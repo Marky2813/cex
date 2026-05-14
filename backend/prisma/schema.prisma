@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma" 
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+model User {
+  id  String @id @default(uuid())
+  username String @unique
+  password String
+  order    Order[] 
+}
+
+model Instrument {
+  id String @id @default(uuid())
+  name String
+  symbol String @unique
+  order  Order[]
+}
+
+model Order {
+  id               String @id @default(uuid())
+  userId           String 
+  instrumentId     String
+  amount           Float
+  type             Type
+  side             Side
+  filledQty        Int
+  totalQty         Int 
+  status           Status
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id])
+  instrument       Instrument @relation(fields: [instrumentId], references: [id])
+  buyfills         Fill[]     @relation("BuyFills")
+  sellfills        Fill[]     @relation("SellFills")
+}
+
+model Fill {
+  id              String @id @default(uuid())
+  buyOrderId      String
+  sellOrderId     String 
+  instrumentId    String
+  amount          Float
+  qty             Int 
+  createdAt       DateTime @default(now())
+  buyOrder        Order  @relation("BuyFills", fields:[buyOrderId], references: [id])
+  sellOrder       Order  @relation("SellFills", fields:[sellOrderId], references: [id])
+  @@unique([buyOrderId, sellOrderId])
+}
+
+
+
+enum Type {
+  Limit
+  Market
+} 
+
+enum Side {
+  Buy
+  Sell
+}
+
+enum Status {
+  Pending 
+  Partial
+  Completed
+  Cancelled
+}
+
+
+// now we need to specify the relationships. 
+// one user can place multiple orders but one order will only belong to one user. one to many relationship from user to order. 
+// let us come to the fill table. one order can have multiple fills. one fill will belong to one buy order and one sell order together of which will be unique. 
