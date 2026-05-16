@@ -17,7 +17,8 @@ model User {
   id  String @id @default(uuid())
   username String @unique
   password String
-  order    Order[] 
+  order    Order[]
+  balance  UserBalance[]
 }
 
 model Instrument {
@@ -25,6 +26,7 @@ model Instrument {
   name String
   symbol String @unique
   order  Order[]
+  balance UserBalance[]
 }
 
 model Order {
@@ -34,8 +36,8 @@ model Order {
   amount           Float
   type             Type
   side             Side
-  filledQty        Int
-  totalQty         Int 
+  filledQty        Float
+  totalQty         Float  
   status           Status
   createdAt        DateTime @default(now())
   user             User     @relation(fields: [userId], references: [id])
@@ -50,14 +52,22 @@ model Fill {
   sellOrderId     String 
   instrumentId    String
   amount          Float
-  qty             Int 
+  qty             Float 
   createdAt       DateTime @default(now())
   buyOrder        Order  @relation("BuyFills", fields:[buyOrderId], references: [id])
   sellOrder       Order  @relation("SellFills", fields:[sellOrderId], references: [id])
   @@unique([buyOrderId, sellOrderId])
 }
 
-
+model UserBalance {
+  id            String  @id  @default(uuid())
+  userId        String
+  instrumentId    String
+  total         Float 
+  locked        Float
+  user          User    @relation(fields: [userId], references: [id])
+  instrument    Instrument @relation(fields: [instrumentId], references: [id])
+}
 
 enum Type {
   Limit
