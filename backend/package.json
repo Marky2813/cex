@@ -5,6 +5,7 @@
   "private": true,
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/express": "^5.0.6",
     "@types/node": "^25.7.0",
     "@types/pg": "^8.20.0",
     "prisma": "^7.8.0",
@@ -16,6 +17,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "heap-js": "^2.7.1",
     "pg": "^8.20.0"
   }
 }
