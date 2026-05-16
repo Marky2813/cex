@@ -2,6 +2,7 @@ import express from "express";
 import { Heap } from 'heap-js';
 
 const app = express();
+app.use(express.json())
 
 type AssetBalance = {
   total: number,
@@ -50,10 +51,42 @@ const orderBooks = {
   }
 }
 
-app.post("signup", (req, res) => {
+//--- Auth --- 
+app.post("/signup", (req, res) => {
 
 })
 
-app.post("signin", (req, res) => {
+app.post("/signin", (req, res) => {
 
 })
+
+app.post("/order",(req, res) => {
+//write -> read from in memory db and run matching engine -> write fills
+})
+
+app.delete("/order/:orderId", (req, res) => {
+
+})
+
+app.get("/orders", (req, res) => {
+
+})
+
+app.get("/orderbook/:symbol", (req, res) => {
+
+})
+
+app.get("/fills/:symbol", (req, res) => {
+
+})
+
+app.get("stocks", (req, res) => {
+
+})
+
+app.get("balance", (req, res) => {
+
+})
+
+app.listen(3000, ()=> console.log("CEX running on :3000"))
+
