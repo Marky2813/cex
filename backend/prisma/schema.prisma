@@ -17,6 +17,9 @@ model User {
   id  String @id @default(uuid())
   username String @unique
   password String
+  usdBal   Float  @default(0)
+  usdLock  Float  @default(0)
+  usdTotl  Float  @default(0)
   order    Order[]
   balance  UserBalance[]
 }

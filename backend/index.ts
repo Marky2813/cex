@@ -54,12 +54,14 @@ const maxHeap = new Heap(customPriorityComparatorMax);
 const maxMap = new Map<number, Order[]>();
 
 const orderBooks = {
-  sell: {
-    minHeap, minMap
-  },
-  buy: {
-    maxHeap, maxMap
-  }
+  // instrumentid: {
+  // sell: {
+  //   minHeap, minMap
+  // },
+  // buy: {
+  //   maxHeap, maxMap
+  // }
+  // }
 }
 
 function authMiddleWare(req:express.Request, res:express.Response, next:express.NextFunction) {
@@ -100,6 +102,7 @@ app.post("/signup", async (req, res) => {
     }
     //if it doesn't exist we need to hash the pasword and then add it to the users table. 
     const hash = await bcrypt.hash(result.data.password, saltrounds);
+    result.data.password = hash
     
     const user = await prisma.user.create({
       data:result.data
