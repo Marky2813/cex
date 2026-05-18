@@ -6,6 +6,7 @@ import { prisma } from "./db";
 import  jwt from "jsonwebtoken"
 import { password } from "bun";
 import { userInfo } from "node:os";
+import { Status, Type, Side } from "./generated/prisma/enums";
 
 const app = express();
 app.use(express.json())
@@ -14,6 +15,22 @@ const saltrounds = 10;
 const authSchema = z.object({
   username:z.string().min(3), 
   password: z.string().min(6)
+})
+
+const instrumentSchema = z.object({
+  name:z.string(), 
+  symbol:z.string()
+})
+
+const orderSchema = z.object({
+  userId:z.string(), 
+  instrumentId:z.string(), 
+  amount:z.number(),
+  side:z.enum(Side), 
+  type:z.enum(Type), 
+  status:z.enum(Status), 
+  totalQty:z.number().optional(), 
+  filledQty:z.number().optional()
 })
 
 type AssetBalance = {
@@ -29,8 +46,20 @@ type Balances = {
   [userId: string]: UserBalance
 }
 
-const BALANCES: Balances = {
-}
+
+let BALANCES: Balances = {};
+//how should balances look. 
+/*
+ BALANCES: {
+    1: {
+    "USD":{
+      locked, total}
+    }, 
+    "SOL":{
+      locked, total    
+    }
+ } 
+*/
 
 type OrderStatus = "pending" | "partial";
 
@@ -62,6 +91,31 @@ const orderBooks = {
   //   maxHeap, maxMap
   // }
   // }
+}
+
+async function populateBalances() {
+  //users, then their usd, then their balances. 
+  const users = await prisma.user.findMany({
+    include: {
+      balance:true
+    }
+  });
+
+    //every user has their specific assets and balance which we need to put in the BALANCES db. 
+    for(const user of users) {
+      BALANCES[user.id] =  {
+        "USD": {
+          locked:user.usdLock, 
+          total:user.usdTotal
+        }
+      }
+      for(const asset of user.balance) {
+        BALANCES[user.id]![asset.instrumentSymbol] = {
+          locked:asset.locked, 
+          total:asset.total
+        }
+      }
+    }
 }
 
 function authMiddleWare(req:express.Request, res:express.Response, next:express.NextFunction) {
@@ -156,8 +210,42 @@ app.post("/signin", async (req, res) => {
   })
 })
 
-app.post("/order",(req, res) => {
+app.post("/addinstrument", async (req, res) => {
+    try {
+    const result = instrumentSchema.safeParse(req.body);
+    if(!result.success) {
+      return res.status(400).json({
+        error:result.error.message
+      })
+    }
+    const instrument = await prisma.instrument.create({
+      data: result.data
+    })
+    res.json({
+      message:"Instrument Added", 
+      instrument
+    })
+  } catch(err) {
+    console.error(err);  
+    return res.status(400).json({
+      message:"error adding instrument", 
+      err
+    })
+  }
+})
+app.post("/order",async (req, res) => {
 //write -> read from in memory db and run matching engine -> write fills
+  const order = orderSchema.safeParse(req.body); 
+  if(!order.success) {
+    return res.status(400).send(order.error.message); 
+  }
+  // check if the user has the usd to place the buy order. for this on load we need to populate the balances with the details of the user.
+  const placedOrder = await prisma.order.create({
+    data:order.data
+  })
+  res.json({
+    message:"order added to the order db"
+  })
 })
 
 app.delete("/order/:orderId", (req, res) => {
@@ -212,5 +300,6 @@ app.put("/addusd/:amt", authMiddleWare, async (req,res) => {
     } 
 })
 
-app.listen(3000, ()=> console.log("CEX running on :3000"))
+await populateBalances();
+app.listen(3000, ()=> console.log(BALANCES))
 

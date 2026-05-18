@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Order" ALTER COLUMN "filledQty" DROP NOT NULL,
+ALTER COLUMN "totalQty" DROP NOT NULL;

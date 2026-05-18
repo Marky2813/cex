@@ -39,8 +39,8 @@ model Order {
   amount           Float
   type             Type
   side             Side
-  filledQty        Float
-  totalQty         Float  
+  filledQty        Float? @default(0)
+  totalQty         Float?  
   status           Status
   createdAt        DateTime @default(now())
   user             User     @relation(fields: [userId], references: [id])
@@ -65,14 +65,14 @@ model Fill {
 model UserBalance {
   id            String  @id  @default(uuid())
   userId        String
-  instrumentId  String
+  instrumentSymbol  String
   total         Float 
   locked        Float
   user          User    @relation(fields: [userId], references: [id])
-  instrument    Instrument @relation(fields: [instrumentId], references: [id])
+  instrument    Instrument @relation(fields: [instrumentSymbol], references: [symbol])
 }
 
-enum Type {
+ enum Type {
   Limit
   Market
 } 
