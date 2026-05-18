@@ -19,7 +19,7 @@ model User {
   password String
   usdBal   Float  @default(0)
   usdLock  Float  @default(0)
-  usdTotl  Float  @default(0)
+  usdTotal Float  @default(0)
   order    Order[]
   balance  UserBalance[]
 }
@@ -65,7 +65,7 @@ model Fill {
 model UserBalance {
   id            String  @id  @default(uuid())
   userId        String
-  instrumentId    String
+  instrumentId  String
   total         Float 
   locked        Float
   user          User    @relation(fields: [userId], references: [id])

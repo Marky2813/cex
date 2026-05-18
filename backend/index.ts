@@ -1,6 +1,6 @@
 import express from "express";
 import { Heap } from 'heap-js';
-import { z } from "zod/v4"; 
+import { string, z } from "zod/v4"; 
 import bcrypt from "bcrypt";
 import { prisma } from "./db";
 import  jwt from "jsonwebtoken"
@@ -66,15 +66,18 @@ const orderBooks = {
 
 function authMiddleWare(req:express.Request, res:express.Response, next:express.NextFunction) {
     try {
-    const token = req.body.token; 
+    const token = req.header('token');
+    console.log(token) 
     if(!token) {
       return res.status(400).send("token does not exist")
     }
     const result = jwt.verify(token, "hello123") as { username:string }; 
     if(!result) {
       return res.status(400).send("malformed token") 
-    } 
-    req.body.username = result.username; 
+    }
+    console.log(result) 
+    req.username = result.username; 
+    //requests other than post do not have a body. what is the solution to this. 
     next();
     } catch(err) {
       console.error("error verifying token", err)
@@ -179,6 +182,34 @@ app.get("stocks", (req, res) => {
 
 app.get("balance", (req, res) => {
 
+})
+
+app.put("/addusd/:amt", authMiddleWare, async (req,res) => {
+      try {
+      const amt:number = Number(req.params.amt);
+      const result = await prisma.user.update({
+        where: {
+          username:req.username
+        }, 
+        data: {
+          usdBal: {
+            increment: amt
+          }, 
+          usdTotal: {
+            increment: amt
+          }, 
+        }
+      })
+      res.json({
+        message:"balance updated", 
+        result
+      })
+    } catch(err) {
+      console.error(err); 
+      return res.status(400).json({
+        err
+      })
+    } 
 })
 
 app.listen(3000, ()=> console.log("CEX running on :3000"))
