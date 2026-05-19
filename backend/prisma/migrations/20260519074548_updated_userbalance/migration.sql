@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "UserBalance" ALTER COLUMN "total" SET DEFAULT 0,
+ALTER COLUMN "locked" SET DEFAULT 0;

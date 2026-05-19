@@ -63,13 +63,14 @@ model Fill {
 }
 
 model UserBalance {
-  id            String  @id  @default(uuid())
-  userId        String
-  instrumentSymbol  String
-  total         Float 
-  locked        Float
-  user          User    @relation(fields: [userId], references: [id])
-  instrument    Instrument @relation(fields: [instrumentSymbol], references: [symbol])
+  id                String  @id  @default(uuid())
+  userId            String
+  instrumentSymbol  String  
+  total             Float   @default(0)
+  locked            Float   @default(0)
+  user              User    @relation(fields: [userId], references: [id])
+  instrument        Instrument @relation(fields: [instrumentSymbol], references: [symbol])
+  @@unique([userId, instrumentSymbol])
 }
 
  enum Type {
