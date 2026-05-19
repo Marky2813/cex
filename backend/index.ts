@@ -23,7 +23,7 @@ const instrumentSchema = z.object({
 })
 
 const orderSchema = z.object({
-  userId:z.string(), 
+  // userId:z.string(),
   instrumentId:z.string(), 
   amount:z.number(),
   side:z.enum(Side), 
@@ -61,34 +61,19 @@ let BALANCES: Balances = {};
  } 
 */
 
-type OrderStatus = "pending" | "partial";
-
 type Order = {
   orderId: string,
   userId: string,
-  orderStatus: OrderStatus,
-  qty: number,
-  amount: number
+  qty: number
 }
-type Node = {
-  price: number,
-  orders: Order[]
-}
-const customPriorityComparatorMin = (a: Node, b: Node) => a.price - b.price;
-const minHeap = new Heap(customPriorityComparatorMin);
-const minMap = new Map<number, Order[]>();
-
-const customPriorityComparatorMax = (a: Node, b: Node) => b.price - a.price;
-// const maxHeap = new Heap(customPriorityComparatorMax);
-// const maxMap = new Map<number, Order[]>();
 
 type Bid = {
-  maxHeap: Heap<Node>, 
+  maxHeap: Heap<number>, 
   maxMap: Map<number, Order[]>
 }
 
 type Ask = {
-  minHeap: Heap<Node>, 
+  minHeap: Heap<number>, 
   minMap: Map<number, Order[]>
 }
 
@@ -107,12 +92,74 @@ const orderBook:OrderBook = {
 function orderBookInit(symbol:string) {
   orderBook[symbol] = {
     buy: {
-      maxHeap: new Heap(customPriorityComparatorMax),
+      maxHeap: new Heap(Heap.maxComparatorNumber),
       maxMap: new Map<number, Order[]>()
     }, 
     sell: {
-      minHeap: new Heap(customPriorityComparatorMin), 
+      minHeap: new Heap(Heap.minComparatorNumber), 
       minMap: new Map<number, Order[]>()
+    }
+  }
+}
+
+async function populateOrderBook() {
+  const orders = await prisma.order.findMany({
+    include: {
+      instrument:true 
+    },
+    where: {
+      status: {
+        in:["Pending", "Partial"]
+      }
+    }
+  })
+  // if the order type is market. then can it ever be pending or partial in the database ?
+  for(const order of orders) {
+    if(!Object.hasOwn(orderBook, order.instrument.symbol)){
+    orderBookInit(order.instrument.symbol);
+    }
+    if(order.type == "Limit") {
+      const symOrderBook = orderBook[order.instrument.symbol]
+      if(order.side == "Buy") {
+        //add the order to the orderBook in the heap and the map.
+        //while using the bracket notation to access object elements. Typescripts verifies if the key(string literal) exists. now after we  chain them here it fails to verify the same.
+        if(!symOrderBook?.buy.maxMap.has(order.amount)) { 
+        symOrderBook?.buy.maxHeap.heapArray.push(order.amount);
+        symOrderBook?.buy.maxMap.set(order.amount, [{
+              orderId: order.id, 
+              userId: order.userId,  
+              qty: order.totalQty!
+            }])
+      } else {
+        //since we share the references of the objects and the arrays. we need not set it again 
+        symOrderBook?.buy.maxMap.get(order.amount)?.push(
+          {
+              orderId: order.id, 
+              userId: order.userId,  
+              qty: order.totalQty!
+            }
+        )
+      }
+      } else {
+        //sell side
+        if(!symOrderBook?.sell.minMap.has(order.amount)) { 
+        symOrderBook?.sell.minHeap.heapArray.push(order.amount);
+        symOrderBook?.sell.minMap.set(order.amount, [{
+              orderId: order.id, 
+              userId: order.userId,  
+              qty: order.totalQty!
+            }])
+      } else {
+        //since we share the references of the objects and the arrays. we need not set it again 
+        symOrderBook?.sell.minMap.get(order.amount)?.push(
+          {
+              orderId: order.id, 
+              userId: order.userId,  
+              qty: order.totalQty!
+            }
+        )
+      }
+      }
     }
   }
 }
@@ -260,18 +307,33 @@ app.post("/addinstrument", async (req, res) => {
 })
 app.post("/order", authMiddleWare, async (req, res) => {
 //write -> read from in memory db and run matching engine -> write fills
-  const order = orderSchema.safeParse(req.body); 
+  let order = orderSchema.safeParse(req.body); 
   if(!order.success) {
     return res.status(400).send(order.error.message); 
   }
-  // check if the user has sufficient usd to place bid
-  if(BALANCES[order.data.userId]!["USD"]!.total < order.data.amount * order.data.totalQty!) {
-    return res.status(400).json({
-      message:"You don't have sufficient to place bid"
-    })
+  const user = await prisma.user.findUnique({
+    where: {
+      username: req.username
+    }, 
+    select: {
+      id:true
+    }
+  })
+  if(!user) {
+    return res.status(500).send("internal server error ")
   }
+  
+  // check if the user has sufficient usd to place bid
+  // if(BALANCES[order.data.userId]!["USD"]!.total < order.data.amount * order.data.totalQty!) {
+  //   return res.status(400).json({
+  //     message:"You don't have sufficient to place bid"
+  //   })
+  // }
+  
   const placedOrder = await prisma.order.create({
-    data:order.data
+    data: {
+      ...order.data, userId: user.id
+    }
   })
 
   //matching begins for the buy order. write uska logic here. 
@@ -359,5 +421,8 @@ app.put("/addusd/:amt", authMiddleWare, async (req,res) => {
 })
 
 await populateBalances();
-app.listen(3000, ()=> console.log(BALANCES))
+await populateOrderBook();
+app.listen(3000, ()=> {
+  console.dir(orderBook, { depth: null })
+})
 
