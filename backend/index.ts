@@ -1,6 +1,6 @@
 import express from "express";
 import { Heap } from 'heap-js';
-import { string, z } from "zod/v4"; 
+import { string, symbol, z } from "zod/v4"; 
 import bcrypt from "bcrypt";
 import { prisma } from "./db";
 import  jwt from "jsonwebtoken"
@@ -79,18 +79,42 @@ const minHeap = new Heap(customPriorityComparatorMin);
 const minMap = new Map<number, Order[]>();
 
 const customPriorityComparatorMax = (a: Node, b: Node) => b.price - a.price;
-const maxHeap = new Heap(customPriorityComparatorMax);
-const maxMap = new Map<number, Order[]>();
+// const maxHeap = new Heap(customPriorityComparatorMax);
+// const maxMap = new Map<number, Order[]>();
 
-const orderBooks = {
-  // instrumentid: {
-  // sell: {
-  //   minHeap, minMap
-  // },
-  // buy: {
-  //   maxHeap, maxMap
-  // }
-  // }
+type Bid = {
+  maxHeap: Heap<Node>, 
+  maxMap: Map<number, Order[]>
+}
+
+type Ask = {
+  minHeap: Heap<Node>, 
+  minMap: Map<number, Order[]>
+}
+
+type InstrumentOrders = {
+  buy: Bid, 
+  sell: Ask
+}
+
+type OrderBook = {
+  [symbol:string]:InstrumentOrders
+}
+
+const orderBook:OrderBook = {
+}
+
+function orderBookInit(symbol:string) {
+  orderBook[symbol] = {
+    buy: {
+      maxHeap: new Heap(customPriorityComparatorMax),
+      maxMap: new Map<number, Order[]>()
+    }, 
+    sell: {
+      minHeap: new Heap(customPriorityComparatorMin), 
+      minMap: new Map<number, Order[]>()
+    }
+  }
 }
 
 async function populateBalances() {
@@ -221,6 +245,7 @@ app.post("/addinstrument", async (req, res) => {
     const instrument = await prisma.instrument.create({
       data: result.data
     })
+    orderBookInit(result.data.symbol)
     res.json({
       message:"Instrument Added", 
       instrument
@@ -233,18 +258,51 @@ app.post("/addinstrument", async (req, res) => {
     })
   }
 })
-app.post("/order",async (req, res) => {
+app.post("/order", authMiddleWare, async (req, res) => {
 //write -> read from in memory db and run matching engine -> write fills
   const order = orderSchema.safeParse(req.body); 
   if(!order.success) {
     return res.status(400).send(order.error.message); 
   }
-  // check if the user has the usd to place the buy order. for this on load we need to populate the balances with the details of the user.
+  // check if the user has sufficient usd to place bid
+  if(BALANCES[order.data.userId]!["USD"]!.total < order.data.amount * order.data.totalQty!) {
+    return res.status(400).json({
+      message:"You don't have sufficient to place bid"
+    })
+  }
   const placedOrder = await prisma.order.create({
     data:order.data
   })
+
+  //matching begins for the buy order. write uska logic here. 
+  
+  //since it is a buy limit order. we need to check the sales heap.
+  
+  //orderbook -> instrument -> sales discover karni hai 
+
+  // orderBook[order.data.instrumentId][sell][minHeap].peek()
+  /*
+  if(Number(Object.keys(minHeap.peek())[0]) <= order.data.amount) {
+    while(filled == total) {
+    //it's not a sinlgle order. it can be multiple orders at the same price by different people 
+    const ask = minHeap.peek();
+    if(ask[value].qty <= order.data.totalQty) {
+      //usd kam zada bhi karna hai 
+      order.data.filledQty = order.data.filledQty+ask[value].qty
+      ask[value].qty = order.data.totalQty -ask[value].qty; 
+      minHeap.pop() //remove the order from the order book
+    } else {
+      ask[value].qty = ask[value].qty - totalQty - filledQty;
+      //make usd exchange
+    }
+  }
+    //buy right away. 
+  }
+  
+  */
   res.json({
-    message:"order added to the order db"
+    message:"order added to the order db", 
+    placedOrder
   })
 })
 
