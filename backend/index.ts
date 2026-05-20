@@ -25,12 +25,13 @@ const instrumentSchema = z.object({
 const orderSchema = z.object({
   // userId:z.string(),
   instrumentId: z.string(),
+  instrumentSymbol:z.string(),
   amount: z.number(),
   side: z.enum(Side),
   type: z.enum(Type),
   status: z.enum(Status),
   totalQty: z.number().optional(),
-  filledQty: z.number().optional()
+  filledQty: z.number().default(0)
 })
 
 const depositSchema = z.object({
@@ -94,6 +95,8 @@ type OrderBook = {
 const orderBook: OrderBook = {
 }
 
+const fills:any = []
+
 function orderBookInit(symbol: string) {
   orderBook[symbol] = {
     buy: {
@@ -133,7 +136,7 @@ async function populateOrderBook() {
           symOrderBook?.buy.maxMap.set(order.amount, [{
             orderId: order.id,
             userId: order.userId,
-            qty: order.totalQty!
+            qty: order.totalQty! - order.filledQty!
           }])
         } else {
           //since we share the references of the objects and the arrays. we need not set it again 
@@ -141,7 +144,7 @@ async function populateOrderBook() {
             {
               orderId: order.id,
               userId: order.userId,
-              qty: order.totalQty!
+              qty: order.totalQty! - order.filledQty!
             }
           )
         }
@@ -152,7 +155,7 @@ async function populateOrderBook() {
           symOrderBook?.sell.minMap.set(order.amount, [{
             orderId: order.id,
             userId: order.userId,
-            qty: order.totalQty!
+            qty: order.totalQty! - order.filledQty!
           }])
         } else {
           //since we share the references of the objects and the arrays. we need not set it again 
@@ -160,7 +163,7 @@ async function populateOrderBook() {
             {
               orderId: order.id,
               userId: order.userId,
-              qty: order.totalQty!
+              qty: order.totalQty! - order.filledQty!
             }
           )
         }
@@ -381,7 +384,7 @@ app.post("/order", authMiddleWare, async (req, res) => {
     }
   })
   if (!user) {
-    return res.status(500).send("internal server error ")
+    return res.status(500).send("internal server error")
   }
 
   // for a buy order: check if the user has sufficient usd to place bid
@@ -390,18 +393,66 @@ app.post("/order", authMiddleWare, async (req, res) => {
       message:"You don't have sufficient to place bid"
     })
   }
-
+  BALANCES[user.id]!["USD"]!.locked = order.data.amount * order.data.totalQty!;
   //for a sell order we need to check if the user has enough instrument balance. 
 
-  const placedOrder = await prisma.order.create({
-    data: {
-      ...order.data, userId: user.id
-    }
-  })
+  // const placedOrder = await prisma.order.create({
+  //   data: {
+  //     ...order.data, userId: user.id
+  //   }
+  // })
 
   //matching begins for the buy order. write uska logic here. 
-
   //since it is a buy limit order. we need to check the sales heap.
+  let ask = orderBook[order.data.instrumentSymbol]?.sell;
+  if(Number(ask!.minHeap.peek()) <= order.data.amount) {
+    
+    while(order.data.filledQty! < order.data.totalQty!) {
+      let sellorders = ask!.minMap.get(ask!.minHeap.peek()!)!
+      let sellorder = sellorders.shift()!;
+      let filledQty = Math.min(sellorder.qty, order.data.totalQty!-order.data.filledQty!);
+      let usdMoved = filledQty * order.data.amount; 
+      sellorder.qty = sellorder.qty - filledQty;
+      order.data.filledQty = order.data.filledQty! + filledQty;
+      BALANCES[user.id]!.USD!.locked = BALANCES[user.id]!.USD!.locked - usdMoved;
+      BALANCES[user.id]!.USD!.total = BALANCES[user.id]!.USD!.total - usdMoved;
+      if(BALANCES[user.id]![order.data.instrumentSymbol]) {
+        BALANCES[user.id]![order.data.instrumentSymbol]!.total += filledQty; 
+      } else {
+        BALANCES[user.id]![order.data.instrumentSymbol] = {
+          total: filledQty, 
+          locked: 0
+        }
+      }
+      BALANCES[sellorder.userId]!.USD!.total = BALANCES[sellorder.userId]!.USD!.total + usdMoved;
+      BALANCES[sellorder.userId]![order.data.instrumentSymbol]!.locked -= filledQty;
+      BALANCES[sellorder.userId]![order.data.instrumentSymbol]!.total -= filledQty;
+      if(sellorder.qty == 0) {
+        fills.push(sellorder)
+        if(sellorders.length == 0) {
+          ask!.minMap.delete(ask!.minHeap.peek()!);
+          ask!.minHeap.pop()
+          if(!(Number(ask!.minHeap.peek()) <= order.data.amount)) break; 
+        }
+      } else {
+        sellorders.unshift(sellorder)
+      }
+      if(!ask?.minHeap.peek()) break;
+    }
+  //while loop until qty filled or break if amt > purchase bid
+    //shift from map orders array... 
+      //check qty || greater or lesser
+       //transaction
+        //subtract qty from seller
+        //add qty to buyer 
+        //update status for both. (may or not removed from fill array)
+        //subtract usd from buyer 
+        //add usd to seller 
+        //create fill 
+        //update balances
+  } else {
+    //add order to the orderbook. ||  not sure if the if will come 
+  }
 
   //orderbook -> instrument -> sales discover karni hai 
 
@@ -427,7 +478,7 @@ app.post("/order", authMiddleWare, async (req, res) => {
   */
   res.json({
     message: "order added to the order db",
-    placedOrder
+    BALANCES, orderBook, fills
   })
 })
 
@@ -486,7 +537,7 @@ app.put("/addusd/:amt", authMiddleWare, async (req, res) => {
 await populateBalances();
 await populateOrderBook();
 app.listen(3000, () => {
-  // console.dir(orderBook, { depth: null })
+  console.dir(orderBook, { depth: null })
   console.log(BALANCES)
 })
 
