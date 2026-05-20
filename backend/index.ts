@@ -70,7 +70,9 @@ let BALANCES: Balances = {};
 type Order = {
   orderId: string,
   userId: string,
-  qty: number
+  availqty: number, 
+  spqty:number,
+  status: string
 }
 
 type Bid = {
@@ -136,7 +138,9 @@ async function populateOrderBook() {
           symOrderBook?.buy.maxMap.set(order.amount, [{
             orderId: order.id,
             userId: order.userId,
-            qty: order.totalQty! - order.filledQty!
+            availqty: order.totalQty! - order.filledQty!,
+            spqty:0, 
+            status: order.status
           }])
         } else {
           //since we share the references of the objects and the arrays. we need not set it again 
@@ -144,7 +148,9 @@ async function populateOrderBook() {
             {
               orderId: order.id,
               userId: order.userId,
-              qty: order.totalQty! - order.filledQty!
+              availqty: order.totalQty! - order.filledQty!,
+              spqty:0,
+              status:order.status
             }
           )
         }
@@ -155,7 +161,9 @@ async function populateOrderBook() {
           symOrderBook?.sell.minMap.set(order.amount, [{
             orderId: order.id,
             userId: order.userId,
-            qty: order.totalQty! - order.filledQty!
+            availqty: order.totalQty! - order.filledQty!,
+            spqty:0,
+            status:order.status
           }])
         } else {
           //since we share the references of the objects and the arrays. we need not set it again 
@@ -163,7 +171,9 @@ async function populateOrderBook() {
             {
               orderId: order.id,
               userId: order.userId,
-              qty: order.totalQty! - order.filledQty!
+              availqty: order.totalQty! - order.filledQty!,
+              spqty:0,
+              status:order.status
             }
           )
         }
@@ -396,11 +406,11 @@ app.post("/order", authMiddleWare, async (req, res) => {
   BALANCES[user.id]!["USD"]!.locked = order.data.amount * order.data.totalQty!;
   //for a sell order we need to check if the user has enough instrument balance. 
 
-  // const placedOrder = await prisma.order.create({
-  //   data: {
-  //     ...order.data, userId: user.id
-  //   }
-  // })
+  const placedOrder = await prisma.order.create({
+    data: {
+      ...order.data, userId: user.id
+    }
+  })
 
   //matching begins for the buy order. write uska logic here. 
   //since it is a buy limit order. we need to check the sales heap.
@@ -410,9 +420,9 @@ app.post("/order", authMiddleWare, async (req, res) => {
     while(order.data.filledQty! < order.data.totalQty!) {
       let sellorders = ask!.minMap.get(ask!.minHeap.peek()!)!
       let sellorder = sellorders.shift()!;
-      let filledQty = Math.min(sellorder.qty, order.data.totalQty!-order.data.filledQty!);
+      let filledQty = Math.min(sellorder.availqty-sellorder.spqty, order.data.totalQty!-order.data.filledQty!);
       let usdMoved = filledQty * order.data.amount; 
-      sellorder.qty = sellorder.qty - filledQty;
+      sellorder.spqty = sellorder.spqty + filledQty;
       order.data.filledQty = order.data.filledQty! + filledQty;
       BALANCES[user.id]!.USD!.locked = BALANCES[user.id]!.USD!.locked - usdMoved;
       BALANCES[user.id]!.USD!.total = BALANCES[user.id]!.USD!.total - usdMoved;
@@ -427,18 +437,98 @@ app.post("/order", authMiddleWare, async (req, res) => {
       BALANCES[sellorder.userId]!.USD!.total = BALANCES[sellorder.userId]!.USD!.total + usdMoved;
       BALANCES[sellorder.userId]![order.data.instrumentSymbol]!.locked -= filledQty;
       BALANCES[sellorder.userId]![order.data.instrumentSymbol]!.total -= filledQty;
-      if(sellorder.qty == 0) {
-        fills.push(sellorder)
+      const fillQty = filledQty;
+      if(sellorder.availqty - sellorder.spqty == 0) {
+        sellorder.status = "Completed"
+        fills.push({...sellorder, fillQty})
         if(sellorders.length == 0) {
           ask!.minMap.delete(ask!.minHeap.peek()!);
           ask!.minHeap.pop()
           if(!(Number(ask!.minHeap.peek()) <= order.data.amount)) break; 
         }
       } else {
+        sellorder.status = "Partial"
+        fills.push({...sellorder, fillQty})
         sellorders.unshift(sellorder)
       }
       if(!ask?.minHeap.peek()) break;
     }
+    //time to create a tranasaction.
+     if(order.data.filledQty! == order.data.totalQty!) order.data.status = "Completed";
+     else order.data.status = "Partial" 
+    await prisma.$transaction([prisma.user.update({
+      where:{
+        id:user.id
+      },
+      data: {
+        usdBal: BALANCES[user.id]!.USD!.total,
+        usdTotal: BALANCES[user.id]!.USD!.total, 
+        usdLock: BALANCES[user.id]!.USD!.locked
+      }
+    }), prisma.order.update({
+      where: {
+        id:placedOrder.id
+      }, data: {
+        status: order.data.status,
+        filledQty:order.data.filledQty
+      }
+    }), prisma.userBalance.upsert({
+      where:{
+        userId_instrumentSymbol:{
+          userId:placedOrder.id, 
+          instrumentSymbol:placedOrder.instrumentSymbol
+        }
+      }, 
+      update:{
+        total:BALANCES[user.id]![order.data.instrumentSymbol]!.total
+      }, 
+      create:{
+        userId:placedOrder.userId, 
+        instrumentSymbol:placedOrder.instrumentSymbol, 
+        locked: 0, 
+        total:BALANCES[user.id]![order.data.instrumentSymbol]!.total
+      }
+    }),...fills.map(fill => prisma.fill.create({
+       data: {
+        buyOrderId:placedOrder.id, 
+        sellOrderId:fill.orderId, 
+        instrumentId:placedOrder.instrumentId, 
+        qty:fill.fillQty, 
+        amount:fill.spqty * placedOrder.amount
+       }
+    })), ...fills.map(fill => prisma.user.update({
+      where:{
+        id:fill.userId
+      },
+      data: {
+        usdBal: BALANCES[fill.userId]!.USD!.total,
+        usdTotal: BALANCES[fill.userId]!.USD!.total, 
+        usdLock: BALANCES[fill.userId]!.USD!.locked
+      }
+    })), ...fills.map(fill => prisma.order.update({
+      where: {
+        id:fill.orderId
+      }, data: {
+        status: fill.status,
+        filledQty: fill.spqty
+      }
+    })), ...fills.map(fill: => prisma.userBalance.upsert({
+      where:{
+        userId_instrumentSymbol:{
+          userId:fill.userId, 
+          instrumentSymbol:placedOrder.instrumentSymbol
+        }
+      }, 
+      update:{
+        total:BALANCES[fill.userId]![order.data.instrumentSymbol]!.total
+      }, 
+      create:{
+        userId:fill.userId, 
+        instrumentSymbol:placedOrder.instrumentSymbol, 
+        locked: 0, 
+        total:BALANCES[fill.userId]![order.data.instrumentSymbol]!.total
+      }
+    }))])
   //while loop until qty filled or break if amt > purchase bid
     //shift from map orders array... 
       //check qty || greater or lesser
@@ -449,33 +539,10 @@ app.post("/order", authMiddleWare, async (req, res) => {
         //subtract usd from buyer 
         //add usd to seller 
         //create fill 
-        //update balances
   } else {
-    //add order to the orderbook. ||  not sure if the if will come 
+    
   }
 
-  //orderbook -> instrument -> sales discover karni hai 
-
-  // orderBook[order.data.instrumentId][sell][minHeap].peek()
-  /*
-  if(Number(Object.keys(minHeap.peek())[0]) <= order.data.amount) {
-    while(filled == total) {
-    //it's not a sinlgle order. it can be multiple orders at the same price by different people 
-    const ask = minHeap.peek();
-    if(ask[value].qty <= order.data.totalQty) {
-      //usd kam zada bhi karna hai 
-      order.data.filledQty = order.data.filledQty+ask[value].qty
-      ask[value].qty = order.data.totalQty -ask[value].qty; 
-      minHeap.pop() //remove the order from the order book
-    } else {
-      ask[value].qty = ask[value].qty - totalQty - filledQty;
-      //make usd exchange
-    }
-  }
-    //buy right away. 
-  }
-  
-  */
   res.json({
     message: "order added to the order db",
     BALANCES, orderBook, fills
