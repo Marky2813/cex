@@ -775,24 +775,89 @@ app.delete("/order/:orderId", authMiddleWare, async (req, res) => {
   res.send(deleted)
 })
 
-app.get("/orders", (req, res) => {
-
+app.get("/orders", async (req, res) => {
+  const orders = await prisma.order.findMany()
+  res.send(orders)
 })
 
 app.get("/orderbook/:symbol", (req, res) => {
-
+  //{sell: [{price:300, qty:5}, {price:250, qty:10}], buy: [{price:200, qty:10}, {price:150, qty:20}]}
+  const symbol = req.params.symbol;
+  if(!symbol || Array.isArray(symbol)) {
+    return res.status(400).json({
+      message: "Invalid symbol"
+    })
+  } 
+  let sell = [];
+  let buy = [];
+  if(!orderBook[symbol]) {
+    return res.status(400).send("no data exists")
+  }
+  for(const key of orderBook[symbol]?.buy.maxMap.keys()) {
+    let e = orderBook[symbol].buy.maxMap.get(key);
+    if(e && e?.length == 0) {
+      return; 
+    }
+    for(let i = 0; i < e!.length; i++) {
+      let obj = {
+      price:key, totalQty:e![i]!.totalqty
+    }
+    buy.push(obj)
+    }
+  }
+  for(const key of orderBook[symbol]?.sell.minMap.keys()) {
+    let e = orderBook[symbol].sell.minMap.get(key);
+    if(e && e?.length == 0) {
+      return; 
+    }
+    for(let i = 0; i < e!.length; i++) {
+      let obj = {
+      price:key, totalQty:e![i]!.totalqty
+    }
+    sell.push(obj)
+    }
+  }
+  res.json({
+    buy, sell
+  })
 })
 
-app.get("/fills/:symbol", (req, res) => {
-
+app.get("/fills/:symbol", async (req, res) => {
+  const symbol = req.params.symbol;
+  if(!symbol || Array.isArray(symbol)) {
+    return res.status(400).send("symbol dne")
+  }
+  const symbolid = await prisma.instrument.findUnique({
+    where: {
+      symbol
+    }
+  })
+  if(!symbolid) {
+    return res.status(400).send("invavlid symbol")
+  }
+  const result = await prisma.fill.findMany({
+    where:{
+      instrumentId:symbolid?.id
+    }
+  })
+  res.send(result)
 })
 
-app.get("stocks", (req, res) => {
 
-})
-
-app.get("balance", (req, res) => {
-
+app.get("balance", authMiddleWare, async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: {
+      username: req.username
+    },
+    select: {
+      id: true
+    }
+  })
+  if (!user) {
+    return res.status(500).send("internal server error ")
+  }
+  const bal = BALANCES[user.id]; 
+  res.json(bal)
 })
 
 app.put("/addusd/:amt", authMiddleWare, async (req, res) => {
