@@ -740,6 +740,12 @@ app.post("/order", authMiddleWare, async (req, res) => {
 })
 
 app.delete("/order/:orderId", authMiddleWare, async (req, res) => {
+  const orderId = req.params.orderid; 
+  if(!orderId || Array.isArray(orderId)) {
+    return res.status(400).json({
+      message:"Invalid orderId"
+    })
+  }
   const user = await prisma.user.findUnique({
     where: {
       username: req.username
@@ -751,6 +757,22 @@ app.delete("/order/:orderId", authMiddleWare, async (req, res) => {
   if (!user) {
     return res.status(500).send("internal server error ")
   }
+  const result = await prisma.order.findUnique({
+    where: {
+      id:orderId, 
+    }
+  })
+  if(result?.userId != user.id) {
+    return res.status(400).json({
+      message:"Cannot delete someone else's order"
+    })
+  }
+  const deleted = await prisma.order.delete({
+    where: {
+      id:orderId, 
+    }
+  })
+  res.send(deleted)
 })
 
 app.get("/orders", (req, res) => {
