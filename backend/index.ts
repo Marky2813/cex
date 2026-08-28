@@ -3,10 +3,13 @@ import { Heap } from 'heap-js';
 import { string, symbol, z } from "zod/v4";
 import bcrypt from "bcrypt";
 import { prisma } from "./db";
-import jwt from "jsonwebtoken"
+import jwt from "jsonwebtoken"; 
+import { createClient } from "redis";
 import { password } from "bun";
 import { userInfo } from "node:os";
 import { Status, Type, Side } from "./generated/prisma/enums";
+import { untilWeGotBack, QUEUE_ID } from "./untilWeGotBack";
+import { client } from "../redis"
 
 const app = express();
 app.use(express.json())
@@ -126,6 +129,7 @@ async function populateOrderBook() {
     }
   })
   // if the order type is market. then can it ever be pending or partial in the database ?
+  // no, the market orders can never be pending 
   for (const order of orders) {
     if (!Object.hasOwn(orderBook, order.instrument.symbol)) {
       orderBookInit(order.instrument.symbol);
@@ -403,10 +407,15 @@ app.post("/order", authMiddleWare, async (req, res) => {
   if (!user) {
     return res.status(500).send("internal server error")
   }
+  const identifier = Math.random()
+  await client.lPush("incoming-order", JSON.stringify({...order.data, userId:user.id, identifier, queueId:QUEUE_ID}))
+  //now the order-response queue will send data back
+  const returnedData = await untilWeGotBack(identifier) 
+  res.json({message: returnedData});
 
   // for a buy order: check if the user has sufficient usd to place bid
   if(order.data.type == "Limit" && order.data.side == "Buy") {
-  if (BALANCES[user.id]!["USD"]!.total < order.data.amount * order.data.totalQty!) {
+  if (BALANCES[user.id]!["USD"]!.total - BALANCES[user.id]!["USD"]!.locked < order.data.amount * order.data.totalQty!) {
     return res.status(400).json({
       message: "You don't have sufficient to place bid"
     })
