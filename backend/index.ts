@@ -410,8 +410,12 @@ app.post("/order", authMiddleWare, async (req, res) => {
   const identifier = Math.random()
   await client.lPush("incoming-order", JSON.stringify({...order.data, userId:user.id, identifier, queueId:QUEUE_ID}))
   //now the order-response queue will send data back
-  const returnedData = await untilWeGotBack(identifier) 
-  res.json({message: returnedData});
+  const returnedData = await untilWeGotBack(identifier);
+  
+  if(returnedData.error == "insufficient_funds") {
+    return res.status(402).json({message:returnedData.message})
+  } 
+  return res.json({message: returnedData});
 
   // for a buy order: check if the user has sufficient usd to place bid
   if(order.data.type == "Limit" && order.data.side == "Buy") {
@@ -872,22 +876,22 @@ app.get("balance", authMiddleWare, async (req, res) => {
 app.put("/addusd/:amt", authMiddleWare, async (req, res) => {
   try {
     const amt: number = Number(req.params.amt);
-    const result = await prisma.user.update({
-      where: {
-        username: req.username
-      },
-      data: {
-        usdBal: {
-          increment: amt
-        },
-        usdTotal: {
-          increment: amt
-        },
-      }
-    })
+    await client.lPush("incoming-order", JSON.stringify({amt, username:req.username, type:"usdbal"}))
+    // const result = await prisma.user.update({
+    //   where: {
+    //     username: req.username
+    //   },
+    //   data: {
+    //     usdBal: {
+    //       increment: amt
+    //     },
+    //     usdTotal: {
+    //       increment: amt
+    //     },
+    //   }
+    // })
     res.json({
       message: "balance updated",
-      result
     })
   } catch (err) {
     console.error(err);
@@ -900,7 +904,7 @@ app.put("/addusd/:amt", authMiddleWare, async (req, res) => {
 await populateBalances();
 await populateOrderBook();
 
-app.listen(3000, () => {
+app.listen(3001, () => {
   console.dir(orderBook, { depth: null })
   console.log(BALANCES)
 })

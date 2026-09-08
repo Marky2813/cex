@@ -15,7 +15,11 @@ async function pollQueue() {
   const parsedResponse = JSON.parse(response.element);
   console.log(parsedResponse)
   if (parsedResponse.identifier && pendingResolves[parsedResponse.identifier]) {
-    pendingResolves[parsedResponse.identifier]({filledQty:parsedResponse.filledQuantity})
+    if(parsedResponse.error) {
+      pendingResolves[parsedResponse.identifier]({error:parsedResponse.error, message:parsedResponse.message})
+    } else {
+      pendingResolves[parsedResponse.identifier]({filledQty:parsedResponse.filledQuantity})
+    }
   }
   pollQueue()
 }
