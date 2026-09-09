@@ -210,10 +210,14 @@ while (1) {
     //check if user has sufficient balance to place order. 
     if (order.side === "Buy") {
       // before placing the order we need to first check if even the order can be placed. 
-      const hasEnoughBalance = balances[order.userId]!["USD"]?.total!-balances[order.userId]!["USD"]?.locked! > order.amount*order.totalQty!;
+      const hasEnoughBalance = balances[order.userId]!["USD"]?.total!-balances[order.userId]!["USD"]?.locked! >= order.amount*order.totalQty!;
       if(!(hasEnoughBalance)) {
-        await responseClient.lPush("order-response" + order.queueId, JSON.stringify({ error:"insufficient_funds", message:"cannot place order because the user does not have enough balance.", identifier: order.identifier }))
+        await responseClient.lPush("order-response" + order.queueId, JSON.stringify({ error:"insufficient_funds", message:"cannot place order because the user does not have enough balance.", identifier: order.identifier }));
+        continue; 
       }
+
+      //lock the money for the order
+      balances[order.userId]!["USD"]!.locked! += order.amount*order.totalQty!;
 
       //order matching logic..
       //the possibility that this instrument does not exist in the orderbook and this is the first buy order
@@ -229,8 +233,38 @@ while (1) {
         // orderBook[order.instrumentId]!.buy.maxMap.set(order.amount, )
       } else {
         // ask order less than or equal to the buy order exist, matching possible. 
+        const fills = []; 
         while(order.filledQty < order.totalQty!){
+          const askOrder = orderBook[order.instrumentId]!.sell.minMap.get(askAmount!)?.shift();
+          //askOrder cannot be undefined because we have already checked that askAmount exists in the minMap.
+
+          //calculate the exchange quantity 
+          const exchangedQuantity = Math.min(order.totalQty!-order.filledQty, askOrder!.totalqty-askOrder!.filledqty);
+
+          //exchange instrument
+          balances[askOrder?.userId!]![order.instrumentSymbol]!.locked -= exchangedQuantity; 
+          balances[askOrder?.userId!]![order.instrumentSymbol]!.total -= exchangedQuantity; 
+          balances[order.userId]![order.instrumentSymbol]!.total += exchangedQuantity; 
+
+          //exchange money
+          balances[order.userId]!["USD"]!.locked -= order.amount*exchangedQuantity; 
+          balances[order.userId]!["USD"]!.total -= order.amount*exchangedQuantity; 
+          balances[askOrder!.userId]!["USD"]!.total += order.amount*exchangedQuantity; 
+
+          //change the fill and fulfilled qty 
+          askOrder!.fulfilledqty +=exchangedQuantity; 
+          order.filledQty += exchangedQuantity; 
           
+          const fill = {
+            instrumentId: order.instrumentId,
+            filledQuantity: exchangedQuantity,
+            amount: order.amount * exchangedQuantity
+          }
+
+          fills.push(fill);
+
+
+          //check if order is completed, if it is then break. else check if the current ask order got completed or if the sell side is out of orders and buy order is not completed then break. 
         }
       }
 
