@@ -217,92 +217,97 @@ async function populateBalances() {
   }
 }
 
-function authMiddleWare(req: express.Request, res: express.Response, next: express.NextFunction) {
+function authMiddleware(req:express.Request, res:express.Response, next:express.NextFunction) {
   try {
-    const token = req.header('token');
-    if (!token) {
-      return res.status(400).send("token does not exist")
-    }
-    const result = jwt.verify(token, "hello123") as { username: string };
-    if (!result) {
-      return res.status(400).send("malformed token")
-    }
-    req.username = result.username;
-    //requests other than post do not have a body. what is the solution to this. 
-    next();
-  } catch (err) {
-    console.error("error verifying token", err)
-    return res.status(400).send("Unauthorized");
+  const token = req.header("token");
+  if(!token) {
+    return res.status(400).json({
+      message:"no token"
+    })
   }
+  const verified = jwt.verify(token, "hello123") as {username:string};
+  if(!verified) {
+    return res.status(400).json({
+      message:"malformed token"
+    })
+  }
+  req.username=verified.username;
+  next();
+} catch(err) {
+  console.error(err)
+  return res.status(400).json({
+    message:"error verifying token"
+  })
+}
 }
 
-//--- Auth --- 
 app.post("/signup", async (req, res) => {
   const result = authSchema.safeParse(req.body);
-  if (!result.success) {
+  if(!result.success) {
     return res.status(400).json({
-      error: result.error.message
+      message:"incorrect data"
     })
   }
   const usernameExists = await prisma.user.findUnique({
-    where: {
-      username: result.data.username
+    where:{
+      username:result.data.username
     }
   })
-  if (usernameExists) {
+  if(usernameExists) {
     return res.status(400).json({
-      message: "Username already exists"
+      "message":"usernmae already exists, please try with a different one"
     })
   }
-  //if it doesn't exist we need to hash the pasword and then add it to the users table. 
-  const hash = await bcrypt.hash(result.data.password, saltrounds);
-  result.data.password = hash
-
+  const password = await bcrypt.hash(result.data.password, saltrounds);
+  result.data.password = password;
+  
   const user = await prisma.user.create({
-    data: result.data
+    data:result.data
   })
 
-  if (!user) {
-    res.status(500).json({
-      message: "Unable to create user"
+  if(!user) {
+    return res.status(500).json({
+      "message":"Unable to create user"
     })
   }
 
-  return res.json({
-    message: "signed up successfully",
-    data: user
+  return res.status(200).json({
+    message:"account created successfully", 
+    user
   })
+
 })
 
 app.post("/signin", async (req, res) => {
   const result = authSchema.safeParse(req.body);
-  if (!result.success) {
+  if(!result.success) {
     return res.status(400).json({
-      error: result.error.message
+      message:"incorrect credentials"
     })
   }
-  const usernameExists = await prisma.user.findUnique({
+  const accountExists = await prisma.user.findUnique({
     where: {
-      username: result.data.username
+      username:result.data.username
     }
   })
-  if (!usernameExists) {
+  if(!accountExists) {
     return res.status(400).json({
-      message: "username does not exist"
+      message:"invalid username"
     })
   }
-  const passwordCorrect = await bcrypt.compare(result.data.password, usernameExists?.password)
-  if (!passwordCorrect) {
+  const comparePass = await bcrypt.compare(result.data.password, accountExists.password);
+  if(!comparePass) {
     return res.status(400).json({
-      message: "incorrect password"
+      message:"invalid password"
     })
   }
+
   const token = jwt.sign({
-    username: usernameExists.username
+    username:accountExists.username
   }, "hello123")
 
-  return res.json({
-    message: "signed in successfully",
+  return res.status(200).json({
+    message:"login successful",
     token
   })
 })
